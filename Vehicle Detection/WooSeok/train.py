@@ -1,4 +1,3 @@
-
 from CarPlate_utils import get_CarPlate
 import os
 import torch
@@ -12,12 +11,15 @@ from engine import train_one_epoch
 import presets
 import utils
 
+import xml.etree.ElementTree as ET
+
 save_model_pth_name = "model_CarPlate"
 save_checkpoint_pth_name = "checkpoint_CarPlate"
 
+
 def get_dataset(name, image_set, transform, data_path):
     paths = {
-        "images" :(data_path, get_CarPlate, 7)
+        "images": (data_path, get_CarPlate, 7)
     }
 
     _above_path, ds_fn, num_classes = paths[name]
@@ -26,30 +28,33 @@ def get_dataset(name, image_set, transform, data_path):
 
     return ds, num_classes
 
+
 def get_transform(train, data_augmentation):
     return presets.DetectionPresetTrain(data_augmentation) if train else presets.DetectionPresetEval()
 
+
 def get_args_parser(add_help=True):
     import argparse
-    parser = argparse.ArgumentParser(description='PyTorch Detection Training', add_help = add_help)
+    parser = argparse.ArgumentParser(description='PyTorch Detection Training', add_help=add_help)
 
     # 커맨드 실행 옵션을 문자열로 받을 것이다.
     # 옵션을 추가하는 부분
     # <옵션이름> <기본값 지정> <옵션 도움말>
 
-    parser.add_argument('--data-path', default = 'Vehicle/Car', help='dataset')
-    parser.add_argument('--dataset', default = 'images', help = 'dataset')
-    parser.add_argument('--model', default = 'fasterrcnn_resnet50_fpn', help='model')
+    parser.add_argument('--data-path', default='Vehicle/Car', help='dataset')
+    parser.add_argument('--dataset', default='images', help='dataset')
+    parser.add_argument('--model', default='fasterrcnn_resnet50_fpn', help='model')
     parser.add_argument('--device', default='cuda', help='device')
-    parser.add_argument('-b', '--batch-size', default=2, type=int, help = 'images per gpu, the total batch size is $NGPU x batch_size')
-    parser.add_argument('--epochs', default=26, type=int, metavar='N', help = 'number of total epochs to run')
+    parser.add_argument('-b', '--batch-size', default=2, type=int,
+                        help='images per gpu, the total batch size is $NGPU x batch_size')
+    parser.add_argument('--epochs', default=1, type=int, metavar='N', help='number of total epochs to run')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N', help='number of total epochs to run')
     parser.add_argument('--lr', default=0.0025, type=float)
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
-    parser.add_argument('--wd', '--weight-decay', default=0.0004, type=float, metavar ='W', dest='weight_decay')
+    parser.add_argument('--wd', '--weight-decay', default=0.0004, type=float, metavar='W', dest='weight_decay')
     parser.add_argument('--lr-scheduler', default='multisteplr')
     parser.add_argument('--lr-step-size', default=8, type=int)
-    parser.add_argument('--lr-steps', default=[16,22], nargs='+', type=int)
+    parser.add_argument('--lr-steps', default=[16, 22], nargs='+', type=int)
     parser.add_argument('--lr-gamma', default=0.1, type=float)
     parser.add_argument('--print-freq', default=20, type=int)
     parser.add_argument('--output-dir', default='.')
@@ -59,23 +64,23 @@ def get_args_parser(add_help=True):
     parser.add_argument('--rpn-score-thresh', default=None, type=float)
     parser.add_argument('--trainable-backbone-layers', default=3, type=int)
     parser.add_argument('--data-augmentation', default='hflip')
-    parser.add_argument('--sync-bn', dest='sync-bn', action ='store_true')
-    parser.add_argument('--test-only', dest='test_only', action = 'store_true')
+    parser.add_argument('--sync-bn', dest='sync-bn', action='store_true')
+    parser.add_argument('--test-only', dest='test_only', action='store_true')
     parser.add_argument('--visualize-only', dest='visualize_only', action='store_true')
     parser.add_argument('--pretained', dest='pretrained', action='store_true')
     return parser
 
 
-
 def main(args):
     if args.output_dir:
         utils.mkdir(args.output_dir)
-    
+
     device = torch.device(args.device)
 
     # Data loading code
 
-    dataset, num_classes = get_dataset(args.dataset, "train", get_transform(True, args.data_augmentation), args.data_path)
+    dataset, num_classes = get_dataset(args.dataset, "train", get_transform(True, args.data_augmentation),
+                                       args.data_path)
 
     dataset_test, _ = get_dataset(args.dataset, 'test', get_transform(False, args.data_augmentation), args.data_path)
 
@@ -83,16 +88,17 @@ def main(args):
 
     data_loader = torch.utils.data.DataLoader(dataset, num_workers=args.workers, collate_fn=utils.collate_fn)
 
-    data_loader_test = torch.utils.data.DataLoader(dataset_test, num_workers= args.workers, collate_fn=utils.collate_fn)
+    data_loader_test = torch.utils.data.DataLoader(dataset_test, num_workers=args.workers, collate_fn=utils.collate_fn)
 
-    kwargs={
+    kwargs = {
         'trainable_backbone_layers': args.trainable_backbone_layers
     }
-    if "rcnn" in args.model :# 모델을 불러오는 방법... 여기에서 in은 앞에잇는 문자열이 포함되는지 여부에 따라 true false를 반환단다.
+    if "rcnn" in args.model:  # 모델을 불러오는 방법... 여기에서 in은 앞에잇는 문자열이 포함되는지 여부에 따라 true false를 반환단다.
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
-    model = torchvision.models.detection.__dict__[args.model](num_classes=num_classes, pretrained=args.pretrained, **kwargs)
+    model = torchvision.models.detection.__dict__[args.model](num_classes=num_classes, pretrained=args.pretrained,
+                                                              **kwargs)
     model.to(device)
     # if args.distributed and args.sync_bn:
     #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -102,7 +108,7 @@ def main(args):
     #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     #     model_without_ddp = model.module
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr = args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = torch.optim.SGD(params, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     args.lr_scheduler = args.lr_scheduler.lower()
 
@@ -114,18 +120,66 @@ def main(args):
         raise RuntimeError("Invalid lr scheduler '{}'. Only MultiStepLR and CosineAnnealingLR "
                            "are supported.".format(args.lr_scheduler))
 
-    
     if args.resume:
         checkpoint = torch.load(args.resume, map_location='cpu')
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        args.start_epoch = checkpoint['epoch']+1
+        args.start_epoch = checkpoint['epoch'] + 1
 
     if args.test_only:
-        # CarPlate_evaluate(model, data_loader_test, device=device)
+
+        os.makedirs('Vehicle/Car/test/label', exist_ok=True)
+        os.makedirs('Vehicle/Car/test/label/detection', exist_ok=True)
+        os.makedirs('Vehicle/Car/test/label/groundtruth', exist_ok=True)
+        root = 'Vehicle/Car/test/annotations'
+        filename = os.listdir(root)
+
+        model.eval()
+        cpu_device = torch.device("cpu")
+        with torch.no_grad():
+            for (images, targets), fname in zip(data_loader_test, filename):
+                images = list(img.to(device) for img in images)
+
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+
+                outputs = model(images)
+                outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+                targets = [{k: v.to(cpu_device) for k, v in t.items()} for t in targets]
+                print(outputs)
+                print(targets)
+                exit()
+                for output, target in zip(outputs, targets):
+                    content = []
+
+                    # groundtruth
+                    for label, box in zip(target['labels'], target['boxes']):
+                        label = label.item()
+                        box = box.numpy()
+
+                        # print(label, 1, box[0], box[1], box[2], box[3])
+                        content.append("{} {} {} {} {} {}".format(label, 1, box[0], box[1], box[2], box[3]))
+                        # print(content)
+                    with open('Vehicle/Car/test/label/groundtruth/' + fname[:-4] + '.txt', 'w') as f:
+                        for i in range(len(content)):
+                            f.write(f'{content[i]}\n')
+
+                    content = []
+                    # detection
+                    for label, conf, box in zip(output['labels'], output['scores'], output['boxes']):
+                        label = label.item()
+                        conf = round(conf.item(), 2)
+                        box = box.numpy()
+
+                        # print(label, conf, box[0], box[1], box[2], box[3])
+                        content.append("{} {} {} {} {} {}".format(label, conf, box[0], box[1], box[2], box[3]))
+                        # print(content)
+                    with open('Vehicle/Car/test/label/detection/' + fname[:-4] + '.txt', 'w') as f:
+                        for i in range(len(content)):
+                            f.write(f'{content[i]}\n')
 
         return
-    
+
     if args.visualize_only:
         model.eval()
         cpu_device = torch.device("cpu")
@@ -137,28 +191,15 @@ def main(args):
 
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
-                    
+
                 outputs = model(images)
                 outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
                 targets = [{k: v.to(cpu_device) for k, v in t.items()} for t in targets]
 
-                # print('outputs:', outputs)
-                # print('targets:', targets)
-
-                # outputs["boxes"] 예측 박스 좌표
-                # outputs["labels"] 예측 라벨
-                # outputs["scores"] 예측 박스에 대한 신뢰도점수
-                # target["boxes"] 실제 박스 좌표
-                # target["labels"] 실제 라벨
-
-                # 시각화 코드 작성
-                # output은 예측 값, target은 실제 값임
-                # output는 scores 기준으로 sort 및 일정 점수 밑에 있는 bbox와 label은 컷 해야됨
-
                 print('---------------------------------new image--------------------------------------')
 
                 tensor_to_pil_image = torchvision.transforms.ToPILImage()
-                classes = ("__background__", "Car", "Number Plate")
+                classes = ("__background__", "Car", "Truck", "Bus", "Etc vehicle", "Bike", "License")
                 from PIL import Image, ImageDraw, ImageFont
                 # import glob
                 # for i in glob.glob(os.path.join("C:/Windows/Fonts/", "*")):
@@ -171,7 +212,7 @@ def main(args):
                     image = tensor_to_pil_image(image)
                     draw = ImageDraw.Draw(image)
 
-                    score_threshold = 2 / 3  # 이 점수 이상일 때만 보여주도록
+                    score_threshold = 0.1  # 이 점수 이상일 때만 보여주도록
                     for box, label, score in zip(output['boxes'], output['labels'], output['scores']):
                         box = box.tolist()
                         label = label.item()
@@ -235,8 +276,6 @@ def main(args):
                     image.show()
         return
 
-                    
-
     print("start training")
     for epoch in range(args.start_epoch, args.epochs):
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq)
@@ -257,8 +296,8 @@ def main(args):
 # 아래와 같이 조건문을 만들면 , def main(args)가 있는 상태에서 아래 조건문을 실행함
 if __name__ == "__main__":
     print("Start")
-    
-    args = get_args_parser().parse_args() #여기에서 command 옵션을 받는 부분
+
+    args = get_args_parser().parse_args()  # 여기에서 command 옵션을 받는 부분
     # 여기에서 위에 있는 get args parser함수를 읽어낸다.
     # 예를 들어 ..... --visualize only--- 이런것을 이야기 하는 것임
     main(args)
