@@ -41,7 +41,7 @@ def get_args_parser(add_help=True):
     # 옵션을 추가하는 부분
     # <옵션이름> <기본값 지정> <옵션 도움말>
 
-    parser.add_argument('--data-path', default='Vehicle', help='dataset')
+    parser.add_argument('--data-path', default='Vehicle/Car', help='dataset')
     parser.add_argument('--dataset', default='images', help='dataset')
     parser.add_argument('--model', default='fasterrcnn_resnet50_fpn', help='model')
     parser.add_argument('--device', default='cuda', help='device')
@@ -129,10 +129,10 @@ def main(args):
 
     if args.test_only:
 
-        os.makedirs('../Vehicle/test/label', exist_ok=True)
-        os.makedirs('../Vehicle/test/label/detection', exist_ok=True)
-        os.makedirs('../Vehicle/test/label/groundtruth', exist_ok=True)
-        root = 'Vehicle/test/annotations'
+        os.makedirs('../Vehicle/Car/test/label', exist_ok=True)
+        os.makedirs('../Vehicle/Car/test/label/detection', exist_ok=True)
+        os.makedirs('../Vehicle/Car/test/label/groundtruth', exist_ok=True)
+        root = 'Vehicle/Car/test/annotations'
         filename = os.listdir(root)
 
         model.eval()
@@ -159,7 +159,7 @@ def main(args):
                         # print(label, 1, box[0], box[1], box[2], box[3])
                         content.append("{} {} {} {} {} {}".format(label, 1, box[0], box[1], box[2], box[3]))
                         # print(content)
-                    with open('Vehicle/test/label/groundtruth/' + fname[:-4] + '.txt', 'w') as f:
+                    with open('Vehicle/Car/test/label/groundtruth/' + fname[:-4] + '.txt', 'w') as f:
                         for i in range(len(content)):
                             f.write(f'{content[i]}\n')
 
@@ -173,7 +173,7 @@ def main(args):
                         # print(label, conf, box[0], box[1], box[2], box[3])
                         content.append("{} {} {} {} {} {}".format(label, conf, box[0], box[1], box[2], box[3]))
                         # print(content)
-                    with open('Vehicle/test/label/detection/' + fname[:-4] + '.txt', 'w') as f:
+                    with open('Vehicle/Car/test/label/detection/' + fname[:-4] + '.txt', 'w') as f:
                         for i in range(len(content)):
                             f.write(f'{content[i]}\n')
 
@@ -223,17 +223,16 @@ def main(args):
                     # print("type:",type(bboxes))
 
                     score_threshold = 0.85  # 점수 임계값
-                    iou_threshold = 0.5  # iou 임계값
-                    print("nms전:",bboxes)
+                    iou_threshold = 0.5     # iou 임계값
                     result_bboxes = postProcess.nms(bboxes, score_threshold, iou_threshold) # nms 호출
-                    print("nms후:",result_bboxes)
+
                     # box 그리기
                     for result_box in result_bboxes:
                         x1, y1, x2, y2 = result_box['bbox']
                         draw.rectangle(
                             ((x1, y1), (x2, y2)),
                             outline=(255, 0, 0),
-                            width=5
+                            width=10
                         )
                         label = result_box['label']
                         score = result_box['score']
@@ -261,7 +260,7 @@ def main(args):
                         draw.rectangle(
                             ((box[0], box[1]), (box[2], box[3])),
                             outline=(0, 0, 255),
-                            width=2
+                            width=1
                         )
 
                         text = f'{classes[label]}'
