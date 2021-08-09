@@ -1,7 +1,6 @@
 import torch
-
 def iou(boxes_preds, boxes_labels):
-    # boxes_preds shape : (N,4) N은 bboxes의 갯수
+    # boxes_preds shape : (N,4) N은 bboxes의 개수
     # boxes_labels shape : (N,4)
     box1_x1 = boxes_preds[..., 0:1] # (N,1)
     box1_y1 = boxes_preds[..., 1:2]
@@ -21,7 +20,7 @@ def iou(boxes_preds, boxes_labels):
 
     box1_area = abs((box1_x2 - box1_x1) * (box1_y2 - box1_y1))
     box2_area = abs((box2_x2 - box2_x1) * (box2_y2 - box2_y1))
-
+    print("iou",intersection / (box1_area + box2_area - intersection + 1e-6))
     return intersection / (box1_area + box2_area - intersection + 1e-6)
 
 def nms(bboxes, score_threshold, iou_threshold):
