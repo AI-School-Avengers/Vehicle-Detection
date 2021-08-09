@@ -87,7 +87,7 @@ class GroupedBatchSampler(BatchSampler):
 def _compute_aspect_ratios_slow(dataset, indices=None):
     print("Your dataset doesn't support the fast path for "
           "computing the aspect ratios, so will iterate over "
-          "the full dataset and load every image instead. "
+          "the full dataset and load every images instead. "
           "This might take some time...")
     if indices is None:
         indices = range(len(dataset))

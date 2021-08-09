@@ -1,128 +1,106 @@
-r"""PyTorch Detection Training.
+import numpy as np
 
-To run in a multi-gpu environment, use the distributed launcher::
-
-    python -m torch.distributed.launch --nproc_per_node=$NGPU --use_env \
-        train.py ... --world-size $NGPU
-
-The default hyperparameters are tuned for training on 8 gpus and 2 images per gpu.
-    --lr 0.02 --batch-size 2 --world-size 8
-If you use different number of gpus, the learning rate should be changed to 0.02/8*$NGPU.
-
-On top of that, for training Faster/Mask R-CNN, the default hyperparameters are
-    --epochs 26 --lr-steps 16 22 --aspect-ratio-group-factor 3
-
-Also, if you train Keypoint R-CNN, the default hyperparameters are
-    --epochs 46 --lr-steps 36 43 --aspect-ratio-group-factor 3
-Because the number of images is smaller in the person keypoint subset of COCO,
-the number of epochs should be adapted so that we have the same number of iterations.
-"""
 from CarPlate_utils import get_CarPlate
-from typing import get_args
-
-import datetime
 import os
-import time
-import cv2
 import torch
-from torch._C import Value
 import torch.utils.data
-from torch.utils.data import dataloader
 import torchvision
 import torchvision.models.detection
 import torchvision.models.detection.mask_rcnn
-import numpy as np
-from coco_utils import get_coco, get_coco_kp
 
-from group_by_aspect_ratio import GroupedBatchSampler, create_aspect_ratio_groups
-from engine import train_one_epoch, coco_evaluate, voc_evaluate, CarPlate_evaluate
+from engine import train_one_epoch
 
 import presets
 import utils
+import postProcess
+
 save_model_pth_name = "model_CarPlate"
 save_checkpoint_pth_name = "checkpoint_CarPlate"
 
+
 def get_dataset(name, image_set, transform, data_path):
     paths = {
-        "images" :(data_path, get_CarPlate, 3)
+        "images": (data_path, get_CarPlate, 7)
     }
-
     _above_path, ds_fn, num_classes = paths[name]
 
-    if name =='voc':
-        ds = ds_fn(_above_path, image_set=image_set, transforms=transform)
-    else :
-        ds = ds_fn(_above_path, image_set=image_set, transforms=transform)
+    ds = ds_fn(_above_path, image_set=image_set, transforms=transform)
+
     return ds, num_classes
+
 
 def get_transform(train, data_augmentation):
     return presets.DetectionPresetTrain(data_augmentation) if train else presets.DetectionPresetEval()
 
+
 def get_args_parser(add_help=True):
     import argparse
-    parser = argparse.ArgumentParser(description='PyTorch Detection Training', add_help = add_help)
+    parser = argparse.ArgumentParser(description='PyTorch Detection Training', add_help=add_help)
 
     # 커맨드 실행 옵션을 문자열로 받을 것이다.
     # 옵션을 추가하는 부분
     # <옵션이름> <기본값 지정> <옵션 도움말>
 
-    parser.add_argument('--data-path', default = 'D:/ai_torch/CarPlateDetection/ALLDATAJooeun/ALLDATA/Data2', help='dataset')
-    parser.add_argument('--dataset', default = 'images', help = 'dataset')
-    parser.add_argument('--model', default = 'fasterrcnn_resnet50_fpn', help='model')
+    parser.add_argument('--data-path', default='Vehicle/Car', help='dataset')
+    parser.add_argument('--dataset', default='images', help='dataset')
+    parser.add_argument('--model', default='fasterrcnn_resnet50_fpn', help='model')
     parser.add_argument('--device', default='cuda', help='device')
-    parser.add_argument('-b', '--batch-size', default=2, type=int, help = 'images per gpu, the total batch size is $NGPU x batch_size')
-    parser.add_argument('--epochs', default=26, type=int, metavar='N', help = 'number of total epochs to run')
+    parser.add_argument('-b', '--batch-size', default=2, type=int,
+                        help='images per gpu, the total batch size is $NGPU x batch_size')
+    parser.add_argument('--epochs', default = 10, type=int, metavar='N', help='number of total epochs to run')
     parser.add_argument('-j', '--workers', default=4, type=int, metavar='N', help='number of total epochs to run')
-    parser.add_argument('--lr', default=0.0025, type=float)
+    parser.add_argument('--lr', default=0.001, type=float)
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M')
-    parser.add_argument('--wd', '--weight-decay', default=0.0004, type=float, metavar ='W', dest='weight_decay')
+    parser.add_argument('--wd', '--weight-decay', default=0.0004, type=float, metavar='W', dest='weight_decay')
     parser.add_argument('--lr-scheduler', default='multisteplr')
     parser.add_argument('--lr-step-size', default=8, type=int)
-    parser.add_argument('--lr-steps', default=[16,22], nargs='+', type=int)
+    parser.add_argument('--lr-steps', default=[16, 22], nargs='+', type=int)
     parser.add_argument('--lr-gamma', default=0.1, type=float)
     parser.add_argument('--print-freq', default=20, type=int)
-    parser.add_argument('--output-dir', default='.')
+    parser.add_argument('--output-dir', default='model')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
     parser.add_argument('--aspect-ratio-group-factor', default=3, type=int)
     parser.add_argument('--rpn-score-thresh', default=None, type=float)
     parser.add_argument('--trainable-backbone-layers', default=3, type=int)
     parser.add_argument('--data-augmentation', default='hflip')
-    parser.add_argument('--sync-bn', dest='sync-bn', action ='store_true')
-    parser.add_argument('--test-only', dest='test_only', action = 'store_true')
+    parser.add_argument('--sync-bn', dest='sync-bn', action='store_true')
+    parser.add_argument('--test-only', dest='test_only', action='store_true')
     parser.add_argument('--visualize-only', dest='visualize_only', action='store_true')
     parser.add_argument('--pretained', dest='pretrained', action='store_true')
+    # parser.add_argument('--score-threshold', default=0.85, type=float, help='score_threshold')
+    # parser.add_argument('--iou-threshold', default=0.5, type=float, help='iou_threshold')
     return parser
-
 
 
 def main(args):
     if args.output_dir:
         utils.mkdir(args.output_dir)
-    
+
     device = torch.device(args.device)
 
     # Data loading code
 
-    dataset, num_classes = get_dataset(args.dataset, "train", 
-                            get_transform(True, args.data_augmentation), args.data_path)
+    dataset, num_classes = get_dataset(args.dataset, "train", get_transform(True, args.data_augmentation),
+                                       args.data_path)
 
-    dataset_test, _ = get_dataset(args.dataset, 'val', get_transform(False, args.data_augmentation), args.data_path)
+    dataset_test, _ = get_dataset(args.dataset, 'test', get_transform(False, args.data_augmentation), args.data_path)
 
     print("Creating data loaders")
 
     data_loader = torch.utils.data.DataLoader(dataset, num_workers=args.workers, collate_fn=utils.collate_fn)
 
-    data_loader_test = torch.utils.data.DataLoader(dataset, num_workers= args.workers, collate_fn=utils.collate_fn)
+    data_loader_test = torch.utils.data.DataLoader(dataset_test, num_workers=args.workers, collate_fn=utils.collate_fn)
 
-    kwargs={
+    kwargs = {
         'trainable_backbone_layers': args.trainable_backbone_layers
     }
-    if "rcnn" in args.model :# 모델을 불러오는 방법... 여기에서 in은 앞에잇는 문자열이 포함되는지 여부에 따라 true false를 반환단다.
+    if "rcnn" in args.model:  # 모델을 불러오는 방법... 여기에서 in은 앞에잇는 문자열이 포함되는지 여부에 따라 true false를 반환단다.
         if args.rpn_score_thresh is not None:
             kwargs["rpn_score_thresh"] = args.rpn_score_thresh
 
-    model = torchvision.models.detection.__dict__[args.model](num_classes=num_classes, pretrained=args.pretrained, **kwargs)
+    model = torchvision.models.detection.__dict__[args.model](num_classes=num_classes, pretrained=args.pretrained,
+                                                              **kwargs)
     model.to(device)
     # if args.distributed and args.sync_bn:
     #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
@@ -132,7 +110,7 @@ def main(args):
     #     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     #     model_without_ddp = model.module
     params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = torch.optim.SGD(params, lr = args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = torch.optim.SGD(params, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
     args.lr_scheduler = args.lr_scheduler.lower()
 
@@ -144,22 +122,73 @@ def main(args):
         raise RuntimeError("Invalid lr scheduler '{}'. Only MultiStepLR and CosineAnnealingLR "
                            "are supported.".format(args.lr_scheduler))
 
-    
     if args.resume:
         checkpoint = torch.load(args.resume, map_location='cpu')
+        model_without_ddp.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-        args.start_epoch = checkpoint['epoch']+1
+        args.start_epoch = checkpoint['epoch'] + 1
 
     if args.test_only:
-        if 'coco' in args.dataset:
-            coco_evaluate(model, data_loader_test, device=device)
-        elif 'voc' in args.dataset:
-            voc_evaluate(model, data_loader_test, device=device)
-        else :#'ALLDATAJooeun' in args.dataset
-            CarPlate_evaluate(model, data_loader_test, device=device)
-        return
-    
+
+        os.makedirs('../Vehicle/Car/test/label', exist_ok=True)
+        os.makedirs('../Vehicle/Car/test/label/detection', exist_ok=True)
+        os.makedirs('../Vehicle/Car/test/label/groundtruth', exist_ok=True)
+        root = 'Vehicle/Car/test/annotations'
+        filename = os.listdir(root)
+
+        model.eval()
+        cpu_device = torch.device("cpu")
+        with torch.no_grad():
+            for (images, targets), fname in zip(data_loader_test, filename):
+                images = list(img.to(device) for img in images)
+
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+
+                outputs = model(images)
+                outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
+                targets = [{k: v.to(cpu_device) for k, v in t.items()} for t in targets]
+
+                for output, target in zip(outputs, targets):
+                    content = []
+
+                    # groundtruth
+                    for label, box in zip(target['labels'], target['boxes']):
+                        label = label.item()
+                        box = box.numpy()
+
+                        # print(label, 1, box[0], box[1], box[2], box[3])
+                        content.append("{} {} {} {} {} {}".format(label, 1, box[0], box[1], box[2], box[3]))
+                        # print(content)
+                    with open('Vehicle/Car/test/label/groundtruth/' + fname[:-4] + '.txt', 'w') as f:
+                        for i in range(len(content)):
+                            f.write(f'{content[i]}\n')
+
+                    boxes = []
+                    content = []
+                    score_threshold = 0.85  # 점수 임계값
+                    iou_threshold = 0.5  # iou 임계값
+                    # detection
+                    for label, score, bbox in zip(output['labels'], output['scores'], output['boxes']):
+                        box = {"label": label.item(), "score": score.item(), "bbox": bbox.tolist()}
+                        boxes.append(box)
+
+                    result_boxes = postProcess.nms(boxes, score_threshold, iou_threshold)  # nms 호출
+
+                    for box in result_boxes:
+                        label = box['label']
+                        conf = round(box['score'], 2)
+                        bbox = box['bbox']
+                        # print(label, conf, box[0], box[1], box[2], box[3])
+                        content.append("{} {} {} {} {} {}".format(label, conf, bbox[0], bbox[1], bbox[2], bbox[3]))
+
+                    with open('Vehicle/Car/test/label/detection/' + fname[:-4] + '.txt', 'w') as f:
+                        for i in range(len(content)):
+                            f.write(f'{content[i]}\n')
+
+            return
+
     if args.visualize_only:
         model.eval()
         cpu_device = torch.device("cpu")
@@ -171,29 +200,16 @@ def main(args):
 
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
-                    
+
                 outputs = model(images)
                 outputs = [{k: v.to(cpu_device) for k, v in t.items()} for t in outputs]
                 targets = [{k: v.to(cpu_device) for k, v in t.items()} for t in targets]
 
-                # print('outputs:', outputs)
-                # print('targets:', targets)
-
-                # outputs["boxes"] 예측 박스 좌표
-                # outputs["labels"] 예측 라벨
-                # outputs["scores"] 예측 박스에 대한 신뢰도점수
-                # target["boxes"] 실제 박스 좌표
-                # target["labels"] 실제 라벨
-
-                # 시각화 코드 작성
-                # output은 예측 값, target은 실제 값임
-                # output는 scores 기준으로 sort 및 일정 점수 밑에 있는 bbox와 label은 컷 해야됨
-
-                print('---------------------------------new image--------------------------------------')
+                print('------------------ ---------------new images--------------------------------------')
 
                 tensor_to_pil_image = torchvision.transforms.ToPILImage()
-                classes = ("__background__", "Car", "Number Plate")
-                from PIL import Image, ImageDraw, ImageFont
+                classes = ("__background__", "Car", "Truck", "Bus", "Etc vehicle", "Bike", "License")
+                from PIL import ImageDraw, ImageFont
                 # import glob
                 # for i in glob.glob(os.path.join("C:/Windows/Fonts/", "*")):
                 #     print(i)
@@ -201,34 +217,45 @@ def main(args):
 
                 ascent, descent = font.getmetrics()
                 font_height = ascent + descent
-                for image, output, target in zip(images, outputs, targets):
+
+
+
+                for image, output, target in zip(images, outputs, targets): # 이미지 하나씩
                     image = tensor_to_pil_image(image)
                     draw = ImageDraw.Draw(image)
+                    bboxes = []
 
-                    score_threshold = 2 / 3  # 이 점수 이상일 때만 보여주도록
-                    for box, label, score in zip(output['boxes'], output['labels'], output['scores']):
-                        box = box.tolist()
-                        label = label.item()
-                        score = score.item()
-                        if score < score_threshold:
-                            continue
+                    for label,score, box in zip(output['labels'], output['scores'], output['boxes']):
+                        bbox = {"label" : label.item(), "score" : score.item(), "bbox" : box.tolist()}
+                        bboxes.append(bbox)
 
+                    # print("box_infos:",bboxes)
+                    # print("type:",type(bboxes))
+
+                    score_threshold = 0.85  # 점수 임계값
+                    iou_threshold = 0.5     # iou 임계값
+                    result_bboxes = postProcess.nms(bboxes, score_threshold, iou_threshold) # nms 호출
+
+                    # box 그리기
+                    for result_box in result_bboxes:
+                        x1, y1, x2, y2 = result_box['bbox']
                         draw.rectangle(
-                            ((box[0], box[1]), (box[2], box[3])),
+                            ((x1, y1), (x2, y2)),
                             outline=(255, 0, 0),
                             width=10
                         )
-
+                        label = result_box['label']
+                        score = result_box['score']
                         text = f'{classes[label]} {100 * score:.2f}%'
                         (width, height), (offset_x, offset_y) = font.font.getsize(text)
                         draw.rectangle(
-                            ((box[0], box[1]), (box[0] + width, box[1] + height + offset_y)),
+                            ((x1, y1), (x1 + width, y1 + height + offset_y)),
                             outline=(0, 0, 0),
                             fill=(0, 0, 0),
                             width=10
                         )
                         draw.text(
-                            (box[0], box[1]),
+                            (x1, y1),
                             text,
                             (255, 0, 0),
                             font=font
@@ -243,7 +270,7 @@ def main(args):
                         draw.rectangle(
                             ((box[0], box[1]), (box[2], box[3])),
                             outline=(0, 0, 255),
-                            width=10
+                            width=1
                         )
 
                         text = f'{classes[label]}'
@@ -269,17 +296,6 @@ def main(args):
                     image.show()
         return
 
-                    
-
-
-
-
-
-
-
-
-                
-
     print("start training")
     for epoch in range(args.start_epoch, args.epochs):
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq)
@@ -295,18 +311,13 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, 'model_{}.pth'.format(epoch)))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, 'checkpoint.pth'))
 
-        if 'coco' in args.dataset:
-            coco_evaluate(model, data_loader_test, device=device)
-        elif 'voc' in args.dataset:
-            voc_evaluate(model, data_loader_test, device=device)
-        
 
 # 이 파이썬 프로그램을 실행 시킬때 밑에 있는 if문이 가장 먼저 실행된다
 # 아래와 같이 조건문을 만들면 , def main(args)가 있는 상태에서 아래 조건문을 실행함
 if __name__ == "__main__":
     print("Start")
-    
-    args = get_args_parser().parse_args() #여기에서 command 옵션을 받는 부분
+
+    args = get_args_parser().parse_args()  # 여기에서 command 옵션을 받는 부분
     # 여기에서 위에 있는 get args parser함수를 읽어낸다.
     # 예를 들어 ..... --visualize only--- 이런것을 이야기 하는 것임
     main(args)

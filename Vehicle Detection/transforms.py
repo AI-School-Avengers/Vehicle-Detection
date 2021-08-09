@@ -72,7 +72,7 @@ class RandomIoUCrop(nn.Module):
 
         if isinstance(image, torch.Tensor):
             if image.ndimension() not in {2, 3}:
-                raise ValueError('image should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
+                raise ValueError('images should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
             elif image.ndimension() == 2:
                 image = image.unsqueeze(0)
 
@@ -150,7 +150,7 @@ class RandomZoomOut(nn.Module):
                 target: Optional[Dict[str, Tensor]] = None) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
         if isinstance(image, torch.Tensor):
             if image.ndimension() not in {2, 3}:
-                raise ValueError('image should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
+                raise ValueError('images should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
             elif image.ndimension() == 2:
                 image = image.unsqueeze(0)
 
@@ -201,7 +201,7 @@ class RandomPhotometricDistort(nn.Module):
                 target: Optional[Dict[str, Tensor]] = None) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
         if isinstance(image, torch.Tensor):
             if image.ndimension() not in {2, 3}:
-                raise ValueError('image should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
+                raise ValueError('images should be 2/3 dimensional. Got {} dimensions.'.format(image.ndimension()))
             elif image.ndimension() == 2:
                 image = image.unsqueeze(0)
 
